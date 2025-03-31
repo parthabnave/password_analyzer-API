@@ -99,7 +99,8 @@ def estimate_time_to_crack(entropy):
         elif seconds > 1e18:  # Cap time to crack at ~1 billion years
             time_to_crack[attack_type] = '> 1 Billion Years'
         else:
-            time_to_crack[attack_type] = str(pd.Timedelta(seconds=seconds))
+            years = seconds / (3600 * 24 * 365)
+            time_to_crack[attack_type] = f'{years:.2e} years'
     
     return time_to_crack
 
