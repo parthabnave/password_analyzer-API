@@ -34,22 +34,102 @@ except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
 # Time-to-crack estimation table (in seconds)
-time_to_crack_table = [
-    (1, 'Instantly'),
-    (10**3, 'Seconds'),
-    (10**4, 'Minutes'),
-    (10**6, 'Hours'),
-    (10**8, 'Days'),
-    (10**10, 'Years'),
-    (10**12, 'Centuries'),
-]
-
-def estimate_time_to_crack(score):
-    base_time = 10 ** (score / 10)
-    for threshold, label in time_to_crack_table:
-        if base_time < threshold:
-            return f'{base_time:.2f} {label}'
-    return f'{base_time:.2f} Millennia'
+def estimate_time_to_crack(features):
+    """
+    Estimates password cracking time based on cryptographic principles.
+    Returns estimates for both bcrypt and SHA-256.
+    
+    Args:
+        features: Dictionary of password features
+        
+    Returns:
+        Dictionary with time estimates for different algorithms
+    """
+    password_length = features['length']
+    has_upper = features['upper'] > 0
+    has_lower = features['lower'] > 0
+    has_digits = features['digits'] > 0
+    has_special = features['special'] > 0
+    
+    # If password is in leaked database, it's compromised
+    if features['is_leaked'] == 1:
+        return {
+            'bcrypt': 'Instantly (password is compromised)',
+            'sha256': 'Instantly (password is compromised)'
+        }
+    
+    # Calculate character set size
+    char_set_size = 0
+    if has_lower:
+        char_set_size += 26
+    if has_upper:
+        char_set_size += 26
+    if has_digits:
+        char_set_size += 10
+    if has_special:
+        char_set_size += 33  # Common special characters
+    
+    # If no characters are used (edge case), assume minimal charset
+    if char_set_size == 0:
+        char_set_size = 26
+    
+    # Calculate effective entropy reduction due to patterns
+    entropy_reduction = 0
+    
+    # Keyboard adjacency reduces entropy
+    if features['proximity'] > password_length * 0.5:
+        entropy_reduction += 2
+    
+    # Repeated patterns reduce entropy
+    if features['repeats'] > 3:
+        entropy_reduction += features['repeats'] / 2
+    
+    # Sequential characters reduce entropy
+    if features['sequential'] > 2:
+        entropy_reduction += features['sequential'] / 2
+    
+    # Calculate effective length (can't be less than 1)
+    effective_length = max(1, password_length - entropy_reduction)
+    
+    # Entropy calculation (bits)
+    entropy_bits = effective_length * math.log2(char_set_size)
+    
+    # Different hash speeds based on common algorithms (guesses per second)
+    # Speeds are approximate for a modern computer with a high-end GPU in 2025
+    hash_speeds = {
+        'bcrypt': 10**4,      # 10,000/second
+        'sha256': 10**8       # 100 million/second
+    }
+    
+    # Average attempts needed is half of the total keyspace
+    possible_combinations = 2 ** entropy_bits
+    average_attempts = possible_combinations / 2
+    
+    result = {}
+    
+    # Calculate time for each algorithm
+    for algorithm, speed in hash_speeds.items():
+        seconds_to_crack = average_attempts / speed
+        
+        # Convert to appropriate time unit
+        if seconds_to_crack < 1:
+            result[algorithm] = 'Instantly'
+        elif seconds_to_crack < 60:
+            result[algorithm] = f'{seconds_to_crack:.2f} seconds'
+        elif seconds_to_crack < 3600:
+            result[algorithm] = f'{seconds_to_crack/60:.2f} minutes'
+        elif seconds_to_crack < 86400:
+            result[algorithm] = f'{seconds_to_crack/3600:.2f} hours'
+        elif seconds_to_crack < 86400*365:
+            result[algorithm] = f'{seconds_to_crack/86400:.2f} days'
+        elif seconds_to_crack < 86400*365*100:
+            result[algorithm] = f'{seconds_to_crack/(86400*365):.2f} years'
+        elif seconds_to_crack < 86400*365*1000:
+            result[algorithm] = f'{seconds_to_crack/(86400*365*100):.2f} centuries'
+        else:
+            result[algorithm] = f'{seconds_to_crack/(86400*365*1000):.2f} millennia'
+    
+    return result
 
 # Helper functions
 def keyboard_proximity(password):
@@ -133,13 +213,15 @@ def analyze_password(request: PasswordRequest):
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
-    time_to_crack = estimate_time_to_crack(score)
+    
+    # Get time estimates for different algorithms
+    time_estimates = estimate_time_to_crack(features)
 
     return {
         'password': password,
         'score': score,
         'strength_category': category,
-        'time_to_crack': time_to_crack,
+        'time_to_crack': time_estimates,
         'features': features
     }
 
