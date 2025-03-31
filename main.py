@@ -33,7 +33,7 @@ try:
 except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
-# Time-to-crack estimation table (in seconds)
+# TTC
 def estimate_time_to_crack(features):
     """
     Estimates password cracking time based on cryptographic principles.
@@ -51,14 +51,12 @@ def estimate_time_to_crack(features):
     has_digits = features['digits'] > 0
     has_special = features['special'] > 0
     
-    # If password is in leaked database, it's compromised
     if features['is_leaked'] == 1:
         return {
             'bcrypt': 'Instantly (password is compromised)',
             'sha256': 'Instantly (password is compromised)'
         }
     
-    # Calculate character set size
     char_set_size = 0
     if has_lower:
         char_set_size += 26
@@ -67,51 +65,38 @@ def estimate_time_to_crack(features):
     if has_digits:
         char_set_size += 10
     if has_special:
-        char_set_size += 33  # Common special characters
-    
-    # If no characters are used (edge case), assume minimal charset
+        char_set_size += 33  
     if char_set_size == 0:
         char_set_size = 26
     
-    # Calculate effective entropy reduction due to patterns
     entropy_reduction = 0
     
-    # Keyboard adjacency reduces entropy
     if features['proximity'] > password_length * 0.5:
         entropy_reduction += 2
     
-    # Repeated patterns reduce entropy
     if features['repeats'] > 3:
         entropy_reduction += features['repeats'] / 2
     
-    # Sequential characters reduce entropy
     if features['sequential'] > 2:
         entropy_reduction += features['sequential'] / 2
     
-    # Calculate effective length (can't be less than 1)
     effective_length = max(1, password_length - entropy_reduction)
     
-    # Entropy calculation (bits)
     entropy_bits = effective_length * math.log2(char_set_size)
     
-    # Different hash speeds based on common algorithms (guesses per second)
-    # Speeds are approximate for a modern computer with a high-end GPU in 2025
     hash_speeds = {
         'bcrypt': 10**4,      # 10,000/second
         'sha256': 10**8       # 100 million/second
     }
     
-    # Average attempts needed is half of the total keyspace
     possible_combinations = 2 ** entropy_bits
     average_attempts = possible_combinations / 2
     
     result = {}
     
-    # Calculate time for each algorithm
     for algorithm, speed in hash_speeds.items():
         seconds_to_crack = average_attempts / speed
         
-        # Convert to appropriate time unit
         if seconds_to_crack < 1:
             result[algorithm] = 'Instantly'
         elif seconds_to_crack < 60:
