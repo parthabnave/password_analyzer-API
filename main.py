@@ -1,15 +1,28 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import pandas as pd
+from xgboost import XGBRegressor
+import json
 import math
 from collections import Counter
 
 app = FastAPI()
 
+# Load model
+model = XGBRegressor()
+model.load_model('password_strength_model.json')
+
 
 # Pydantic model for request body
 class PasswordInput(BaseModel):
     password: str
+
+
+class PasswordResponse(BaseModel):
+    password: str
+    strength: str
+    score: int
+    features: dict
 
 
 # Utility Functions (Reusing from previous implementation)
@@ -44,18 +57,6 @@ def extract_features(password):
     }
 
 
-def calculate_rule_based_score(features):
-    score = (
-            features['length'] * 2 +
-            features['entropy'] * 10 +
-            (features['upper'] + features['digits'] + features['special']) * 5 -
-            features['repeats'] * 3 -
-            features['sequential'] * 2 -
-            features['is_leaked'] * 30
-    )
-    return max(0, min(100, int(score)))
-
-
 def strength_category(score):
     if score < 30:
         return "Very Weak"
@@ -70,21 +71,23 @@ def strength_category(score):
 
 
 # API Endpoint
-@app.post("/analyze-password")
+@app.post("/analyze-password", response_model=PasswordResponse)
 async def analyze_password(input_data: PasswordInput):
     password = input_data.password
     if not password:
         raise HTTPException(status_code=400, detail="Password cannot be empty.")
 
     features = extract_features(password)
-    score = calculate_rule_based_score(features)
+    features_df = pd.DataFrame([features])
+    score = int(model.predict(features_df)[0])
+    score = max(0, min(100, score))
     category = strength_category(score)
 
-    return {
-        "password": password,
-        "strength": category,
-        "score": score,
-        "features": features
-    }
+    return PasswordResponse(
+        password=password,
+        strength=category,
+        score=score,
+        features=features
+    )
 
-# To run: uvicorn main:app --reload
+# To run: uvicorn password_strength_api:app --reload
