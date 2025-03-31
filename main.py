@@ -33,6 +33,24 @@ try:
 except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
+# Time-to-crack estimation table (in seconds)
+time_to_crack_table = [
+    (1, 'Instantly'),
+    (10**3, 'Seconds'),
+    (10**4, 'Minutes'),
+    (10**6, 'Hours'),
+    (10**8, 'Days'),
+    (10**10, 'Years'),
+    (10**12, 'Centuries'),
+]
+
+def estimate_time_to_crack(score):
+    base_time = 10 ** (score / 10)
+    for threshold, label in time_to_crack_table:
+        if base_time < threshold:
+            return f'{base_time:.2f} {label}'
+    return f'{base_time:.2f} Millennia'
+
 # Helper functions
 def keyboard_proximity(password):
     distance = 0
@@ -115,11 +133,13 @@ def analyze_password(request: PasswordRequest):
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
+    time_to_crack = estimate_time_to_crack(score)
 
     return {
         'password': password,
         'score': score,
         'strength_category': category,
+        'time_to_crack': time_to_crack,
         'features': features
     }
 
