@@ -33,24 +33,6 @@ try:
 except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
-# Time-to-crack estimation table (in seconds)
-time_to_crack_table = [
-    (1, 'Instantly'),
-    (10**3, 'Seconds'),
-    (10**4, 'Minutes'),
-    (10**6, 'Hours'),
-    (10**8, 'Days'),
-    (10**10, 'Years'),
-    (10**12, 'Centuries'),
-]
-
-def estimate_time_to_crack(score):
-    base_time = 10 ** (score / 10)
-    for threshold, label in time_to_crack_table:
-        if base_time < threshold:
-            return f'{base_time:.2f} {label}'
-    return f'{base_time:.2f} Millennia'
-
 # Helper functions
 def keyboard_proximity(password):
     distance = 0
@@ -84,10 +66,46 @@ def conditional_entropy(password):
     entropy = -sum((count / total_bigrams) * math.log2(count / total_bigrams) for count in bigram_counts.values())
     return round(entropy, 2)
 
+def calculate_entropy(password):
+    length = len(password)
+    charset_size = 0
+    if any(c.islower() for c in password):
+        charset_size += 26
+    if any(c.isupper() for c in password):
+        charset_size += 26
+    if any(c.isdigit() for c in password):
+        charset_size += 10
+    if any(not c.isalnum() for c in password):
+        charset_size += 33
+
+    if charset_size == 0:
+        return 0
+
+    entropy = length * math.log2(charset_size)
+    return round(entropy, 2)
+
+def estimate_time_to_crack(entropy):
+    attempts_per_second = {
+        'Online Attack': 1_000,
+        'Offline Attack': 1_000_000_000_000,
+        'GPU Cluster Attack': 100_000_000_000_000
+    }
+
+    time_to_crack = {}
+    for attack_type, rate in attempts_per_second.items():
+        seconds = 2 ** entropy / rate
+        if seconds < 1:
+            time_to_crack[attack_type] = '< 1 second'
+        else:
+            time_to_crack[attack_type] = str(pd.Timedelta(seconds=seconds))
+    
+    return time_to_crack
+
 def extract_features(password):
     length = len(password)
     freq = Counter(password)
     entropy = conditional_entropy(password)
+    calculated_entropy = calculate_entropy(password)
 
     upper = sum(1 for c in password if c.isupper())
     lower = sum(1 for c in password if c.islower())
@@ -99,9 +117,12 @@ def extract_features(password):
     proximity = keyboard_proximity(password)
     is_leaked = 1 if password in leaked_passwords else 0
 
+    time_to_crack = estimate_time_to_crack(calculated_entropy)
+
     return {
         'length': length,
         'entropy': entropy,
+        'calculated_entropy': calculated_entropy,
         'upper': upper,
         'lower': lower,
         'digits': digits,
@@ -110,6 +131,7 @@ def extract_features(password):
         'sequential': sequential,
         'proximity': proximity,
         'is_leaked': is_leaked,
+        'time_to_crack': time_to_crack
     }
 
 def strength_category(score):
@@ -133,13 +155,11 @@ def analyze_password(request: PasswordRequest):
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
-    time_to_crack = estimate_time_to_crack(score)
 
     return {
         'password': password,
         'score': score,
         'strength_category': category,
-        'time_to_crack': time_to_crack,
         'features': features
     }
 
