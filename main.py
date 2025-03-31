@@ -153,12 +153,18 @@ class PasswordRequest(BaseModel):
 def analyze_password(request: PasswordRequest):
     password = request.password
     features = extract_features(password)
-    features_df = pd.DataFrame([features])
-
+    
+    # Create a copy of features for prediction and drop non-numeric columns
+    features_for_prediction = features.copy()
+    if "time_to_crack" in features_for_prediction:
+        del features_for_prediction["time_to_crack"]
+    
+    features_df = pd.DataFrame([features_for_prediction])
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
 
+    # Return the full features (including time_to_crack) in the response
     return {
         'password': password,
         'score': score,
