@@ -5,6 +5,8 @@ import math
 import joblib
 from collections import Counter
 from xgboost import XGBRegressor
+from transformers import pipeline
+import json
 
 # Initialize FastAPI app
 app = FastAPI()
@@ -13,17 +15,21 @@ app = FastAPI()
 model = XGBRegressor()
 model.load_model('password_strength_model.json')
 
+# Initialize the text-generation pipeline with Mistral.
+# Replace "mistralai/mistral-base" with your actual Mistral model identifier if different.
+llm_generator = pipeline("text-generation", model="mistralai/mistral-base", trust_remote_code=True)
+
 # QWERTY keyboard adjacency map
 qwerty_adjacency = {
-    '1':'2q', '2':'1qw3', '3':'2we4', '4':'3er5', '5':'4rt6',
-    '6':'5ty7', '7':'6yu8', '8':'7ui9', '9':'8io0', '0':'9op',
-    'q':'12wa', 'w':'23qeas', 'e':'34wrds', 'r':'45etdf',
-    't':'56ryfg', 'y':'67tuhg', 'u':'78yijh', 'i':'89uokj',
-    'o':'90ipkl', 'p':'0ol', 'a':'qwsz', 's':'awsxed',
-    'd':'esxwrc', 'f':'rtdcvg', 'g':'tyfvhb', 'h':'uygbjn',
-    'j':'uihknm', 'k':'iojlm', 'l':'opk', 'z':'asx',
-    'x':'zsdce', 'c':'xdfv', 'v':'fcgb', 'b':'vghn',
-    'n':'bhjm', 'm':'njk'
+    '1': '2q', '2': '1qw3', '3': '2we4', '4': '3er5', '5': '4rt6',
+    '6': '5ty7', '7': '6yu8', '8': '7ui9', '9': '8io0', '0': '9op',
+    'q': '12wa', 'w': '23qeas', 'e': '34wrds', 'r': '45etdf',
+    't': '56ryfg', 'y': '67tuhg', 'u': '78yijh', 'i': '89uokj',
+    'o': '90ipkl', 'p': '0ol', 'a': 'qwsz', 's': 'awsxed',
+    'd': 'esxwrc', 'f': 'rtdcvg', 'g': 'tyfvhb', 'h': 'uygbjn',
+    'j': 'uihknm', 'k': 'iojlm', 'l': 'opk', 'z': 'asx',
+    'x': 'zsdce', 'c': 'xdfv', 'v': 'fcgb', 'b': 'vghn',
+    'n': 'bhjm', 'm': 'njk'
 }
 
 # Load leaked passwords
@@ -33,30 +39,20 @@ try:
 except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
-# TTC
+# Time-To-Crack Estimation function
 def estimate_time_to_crack(features):
-    """
-    Estimates password cracking time based on cryptographic principles.
-    Returns estimates for both bcrypt and SHA-256.
-    
-    Args:
-        features: Dictionary of password features
-        
-    Returns:
-        Dictionary with time estimates for different algorithms
-    """
     password_length = features['length']
     has_upper = features['upper'] > 0
     has_lower = features['lower'] > 0
     has_digits = features['digits'] > 0
     has_special = features['special'] > 0
-    
+
     if features['is_leaked'] == 1:
         return {
             'bcrypt': 'Instantly (password is compromised)',
             'sha256': 'Instantly (password is compromised)'
         }
-    
+
     char_set_size = 0
     if has_lower:
         char_set_size += 26
@@ -68,35 +64,30 @@ def estimate_time_to_crack(features):
         char_set_size += 33  
     if char_set_size == 0:
         char_set_size = 26
-    
+
     entropy_reduction = 0
-    
     if features['proximity'] > password_length * 0.5:
         entropy_reduction += 2
-    
     if features['repeats'] > 3:
         entropy_reduction += features['repeats'] / 2
-    
     if features['sequential'] > 2:
         entropy_reduction += features['sequential'] / 2
-    
+
     effective_length = max(1, password_length - entropy_reduction)
-    
     entropy_bits = effective_length * math.log2(char_set_size)
-    
+
     hash_speeds = {
-        'bcrypt': 10**4,      # 10,000/second
-        'sha256': 10**8       # 100 million/second
+        'bcrypt': 10**4,      # 10,000 attempts per second
+        'sha256': 10**8       # 100 million attempts per second
     }
-    
+
     possible_combinations = 2 ** entropy_bits
     average_attempts = possible_combinations / 2
-    
     result = {}
-    
+
     for algorithm, speed in hash_speeds.items():
         seconds_to_crack = average_attempts / speed
-        
+
         if seconds_to_crack < 1:
             result[algorithm] = 'Instantly'
         elif seconds_to_crack < 60:
@@ -113,7 +104,7 @@ def estimate_time_to_crack(features):
             result[algorithm] = f'{seconds_to_crack/(86400*365*100):.2f} centuries'
         else:
             result[algorithm] = f'{seconds_to_crack/(86400*365*1000):.2f} millennia'
-    
+
     return result
 
 # Helper functions
@@ -151,14 +142,11 @@ def conditional_entropy(password):
 
 def extract_features(password):
     length = len(password)
-    freq = Counter(password)
     entropy = conditional_entropy(password)
-
     upper = sum(1 for c in password if c.isupper())
     lower = sum(1 for c in password if c.islower())
     digits = sum(1 for c in password if c.isdigit())
     special = sum(1 for c in password if not c.isalnum())
-
     repeats = repeated_substring_count(password)
     sequential = sum(1 for i in range(length-1) if ord(password[i+1]) - ord(password[i]) == 1)
     proximity = keyboard_proximity(password)
@@ -178,15 +166,55 @@ def extract_features(password):
     }
 
 def strength_category(score):
-    if score < 30: return "Very Weak"
-    elif score < 50: return "Weak"
-    elif score < 70: return "Medium"
-    elif score < 85: return "Strong"
-    else: return "Very Strong"
+    if score < 30:
+        return "Very Weak"
+    elif score < 50:
+        return "Weak"
+    elif score < 70:
+        return "Medium"
+    elif score < 85:
+        return "Strong"
+    else:
+        return "Very Strong"
 
-# Request Body Model
+# Request Body Models
 class PasswordRequest(BaseModel):
     password: str
+
+class PasswordAnalysis(BaseModel):
+    password: str
+    score: int
+    strength_category: str
+    time_to_crack: dict
+    features: dict
+
+# LLM-based improvements integration using transformers (Mistral)
+def generate_improvements_with_llm(analysis: dict) -> dict:
+    # Construct the prompt with the full analysis details.
+    prompt = (
+        "Analyze the following password analysis and suggest improvements to strengthen the password. "
+        "Also, provide a new improved password that resembles the original, but is more secure.\n\n"
+        f"Password: {analysis['password']}\n"
+        f"Score: {analysis['score']}\n"
+        f"Strength Category: {analysis['strength_category']}\n"
+        f"Time to Crack: {analysis['time_to_crack']}\n"
+        f"Features: {analysis['features']}\n\n"
+        "Provide your suggestions and new password in JSON format with keys 'suggestions' (a list of strings) "
+        "and 'improved_password' (a string)."
+    )
+
+    try:
+        # Call the LLM and generate a response.
+        response = llm_generator(prompt, max_length=250)[0]['generated_text']
+        # Attempt to locate and parse the JSON output from the response.
+        json_start = response.find('{')
+        if json_start == -1:
+            raise ValueError("No JSON object found in the response.")
+        json_str = response[json_start:]
+        improvements = json.loads(json_str)
+        return improvements
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing LLM response: {e}")
 
 # API Endpoints
 @app.post('/analyze_password/')
@@ -194,12 +222,9 @@ def analyze_password(request: PasswordRequest):
     password = request.password
     features = extract_features(password)
     features_df = pd.DataFrame([features])
-
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
-    
-    # Get time estimates for different algorithms
     time_estimates = estimate_time_to_crack(features)
 
     return {
@@ -208,6 +233,15 @@ def analyze_password(request: PasswordRequest):
         'strength_category': category,
         'time_to_crack': time_estimates,
         'features': features
+    }
+
+@app.post('/improve_password/')
+def improve_password(analysis: PasswordAnalysis):
+    analysis_dict = analysis.dict()
+    llm_response = generate_improvements_with_llm(analysis_dict)
+    return {
+        "original_analysis": analysis_dict,
+        "llm_improvements": llm_response
     }
 
 @app.get('/')
