@@ -13,7 +13,7 @@ app = FastAPI()
 model = XGBRegressor()
 model.load_model('password_strength_model.json')
 
-llm_generator = pipeline("text-generation", model="distilbert/distilgpt2")
+llm_generator = pipeline("text-generation", model="distilgpt2")
 
 qwerty_adjacency = {
     '1': '2q', '2': '1qw3', '3': '2we4', '4': '3er5', '5': '4rt6',
