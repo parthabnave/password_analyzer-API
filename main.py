@@ -8,18 +8,13 @@ from xgboost import XGBRegressor
 from transformers import pipeline
 import json
 
-# Initialize FastAPI app
 app = FastAPI()
 
-# Load XGBoost model
 model = XGBRegressor()
 model.load_model('password_strength_model.json')
 
-# Initialize the text-generation pipeline with Mistral.
-# Replace "mistralai/mistral-base" with your actual Mistral model identifier if different.
-llm_generator = pipeline("text-generation", model="mistralai/mistral-base", trust_remote_code=True)
+llm_generator = pipeline("text-generation", model="distilbert/distilgpt2")
 
-# QWERTY keyboard adjacency map
 qwerty_adjacency = {
     '1': '2q', '2': '1qw3', '3': '2we4', '4': '3er5', '5': '4rt6',
     '6': '5ty7', '7': '6yu8', '8': '7ui9', '9': '8io0', '0': '9op',
@@ -32,14 +27,12 @@ qwerty_adjacency = {
     'n': 'bhjm', 'm': 'njk'
 }
 
-# Load leaked passwords
 try:
     with open('rockyou.txt', 'r', encoding='latin-1') as f:
         leaked_passwords = set(line.strip() for line in f)
 except FileNotFoundError:
     leaked_passwords = {'password', '123456', 'qwerty', 'abc123'}
 
-# Time-To-Crack Estimation function
 def estimate_time_to_crack(features):
     password_length = features['length']
     has_upper = features['upper'] > 0
@@ -107,7 +100,6 @@ def estimate_time_to_crack(features):
 
     return result
 
-# Helper functions
 def keyboard_proximity(password):
     distance = 0
     for i in range(len(password) - 1):
@@ -177,7 +169,6 @@ def strength_category(score):
     else:
         return "Very Strong"
 
-# Request Body Models
 class PasswordRequest(BaseModel):
     password: str
 
@@ -188,9 +179,7 @@ class PasswordAnalysis(BaseModel):
     time_to_crack: dict
     features: dict
 
-# LLM-based improvements integration using transformers (Mistral)
 def generate_improvements_with_llm(analysis: dict) -> dict:
-    # Construct the prompt with the full analysis details.
     prompt = (
         "Analyze the following password analysis and suggest improvements to strengthen the password. "
         "Also, provide a new improved password that resembles the original, but is more secure.\n\n"
@@ -204,9 +193,7 @@ def generate_improvements_with_llm(analysis: dict) -> dict:
     )
 
     try:
-        # Call the LLM and generate a response.
         response = llm_generator(prompt, max_length=250)[0]['generated_text']
-        # Attempt to locate and parse the JSON output from the response.
         json_start = response.find('{')
         if json_start == -1:
             raise ValueError("No JSON object found in the response.")
@@ -216,7 +203,6 @@ def generate_improvements_with_llm(analysis: dict) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing LLM response: {e}")
 
-# API Endpoints
 @app.post('/analyze_password/')
 def analyze_password(request: PasswordRequest):
     password = request.password
