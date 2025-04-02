@@ -2,17 +2,21 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import pandas as pd
 import math
-import joblib
 from collections import Counter
 from xgboost import XGBRegressor
-import json
+import sys
 
 app = FastAPI()
 
-model = XGBRegressor()
-model.load_model('password_strength_model.json')
+# Load XGBoost model
+try:
+    model = XGBRegressor()
+    model.load_model('password_strength_model.json')
+except Exception as e:
+    print(f"Error loading XGBoost model: {e}")
+    sys.exit(1)
 
-
+# QWERTY adjacency map
 qwerty_adjacency = {
     '1': '2q', '2': '1qw3', '3': '2we4', '4': '3er5', '5': '4rt6',
     '6': '5ty7', '7': '6yu8', '8': '7ui9', '9': '8io0', '0': '9op',
@@ -25,6 +29,7 @@ qwerty_adjacency = {
     'n': 'bhjm', 'm': 'njk'
 }
 
+# Load leaked passwords
 try:
     with open('rockyou.txt', 'r', encoding='latin-1') as f:
         leaked_passwords = set(line.strip() for line in f)
@@ -167,32 +172,87 @@ def strength_category(score):
     else:
         return "Very Strong"
 
-class PasswordRequest(BaseModel):
-    password: str
-
-class PasswordAnalysis(BaseModel):
-    password: str
-    score: int
-    strength_category: str
-    time_to_crack: dict
-    features: dict
-
-@app.post('/analyze_password/')
-def analyze_password(request: PasswordRequest):
-    password = request.password
+def analyze_password_logic(password: str):
     features = extract_features(password)
     features_df = pd.DataFrame([features])
     score = int(model.predict(features_df)[0])
     score = max(0, min(100, score))
     category = strength_category(score)
     time_estimates = estimate_time_to_crack(features)
-
     return {
         'password': password,
         'score': score,
         'strength_category': category,
         'time_to_crack': time_estimates,
         'features': features
+    }
+
+def generate_suggestions(analysis):
+    features = analysis['features']
+    score = analysis['score']
+    suggestions = []
+
+    # Heuristic rules for suggestions
+    if features['length'] < 8:
+        suggestions.append("Increase the password length to at least 8 characters for better security.")
+    if features['upper'] == 0:
+        suggestions.append("Add at least one uppercase letter to improve complexity.")
+    if features['lower'] == 0:
+        suggestions.append("Include at least one lowercase letter for variety.")
+    if features['digits'] == 0:
+        suggestions.append("Add at least one digit to enhance strength.")
+    if features['special'] == 0:
+        suggestions.append("Incorporate at least one special character (e.g., !, @, #) for added security.")
+    if features['repeats'] > 2:
+        suggestions.append("Reduce repeated patterns or substrings to make it harder to guess.")
+    if features['sequential'] > 1:
+        suggestions.append("Avoid sequential characters (e.g., 'abc' or '123') to increase randomness.")
+    if features['proximity'] > features['length'] * 0.5:
+        suggestions.append("Minimize the use of adjacent keyboard keys (e.g., 'qwerty') for better randomness.")
+    if features['is_leaked'] == 1:
+        suggestions.append("This password is in a known leak database; choose a unique one.")
+    if score < 50 and not suggestions:
+        suggestions.append("Your password is weak; consider making it longer and more diverse.")
+    elif score < 70 and not suggestions:
+        suggestions.append("Your password is moderately strong; add more variety to improve it.")
+    elif not suggestions:
+        suggestions.append("Your password is strong; maintain its complexity.")
+
+    return suggestions
+
+def apply_leetspeak(password):
+    leetspeak_dict = {
+        'a': '4', 'b': '8', 'e': '3', 'g': '6', 'i': '1', 'o': '0', 's': '5', 't': '7', 'z': '2'
+    }
+    new_password = ''.join(leetspeak_dict.get(c, c) if c.islower() else c for c in password)
+    return new_password
+
+class PasswordRequest(BaseModel):
+    password: str
+
+@app.post('/analyze_password/')
+def analyze_password(request: PasswordRequest):
+    return analyze_password_logic(request.password)
+
+@app.post('/improve_password/')
+def improve_password(request: PasswordRequest):
+    password = request.password
+    
+    # Analyze the original password
+    original_analysis = analyze_password_logic(password)
+    
+    # Generate heuristic suggestions
+    suggestions = generate_suggestions(original_analysis)
+    
+    # Generate and analyze the leetspeak password
+    leetspeak_password = apply_leetspeak(password)
+    leetspeak_analysis = analyze_password_logic(leetspeak_password)
+    
+    # Return all information
+    return {
+        "original_analysis": original_analysis,
+        "suggestions": suggestions,
+        "leetspeak_password": leetspeak_analysis
     }
 
 @app.get('/')
