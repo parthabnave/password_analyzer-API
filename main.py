@@ -234,6 +234,27 @@ class PasswordRequest(BaseModel):
 def analyze_password(request: PasswordRequest):
     return analyze_password_logic(request.password)
 
+def improve_password_score(password):
+    improved_password = apply_leetspeak(password)
+    
+    # Ensure the improved password has a good score
+    while True:
+        analysis = analyze_password_logic(improved_password)
+        if analysis['score'] >= 70:
+            break
+        
+        # Apply modifications to enhance security
+        if analysis['features']['length'] < 12:
+            improved_password += '!@'
+        if analysis['features']['upper'] == 0:
+            improved_password = improved_password[:2] + 'A' + improved_password[2:]
+        if analysis['features']['digits'] == 0:
+            improved_password += '7'
+        if analysis['features']['special'] == 0:
+            improved_password += '#'
+        
+    return improved_password
+
 @app.post('/improve_password/')
 def improve_password(request: PasswordRequest):
     password = request.password
@@ -244,16 +265,18 @@ def improve_password(request: PasswordRequest):
     # Generate heuristic suggestions
     suggestions = generate_suggestions(original_analysis)
     
-    # Generate and analyze the leetspeak password
-    leetspeak_password = apply_leetspeak(password)
-    leetspeak_analysis = analyze_password_logic(leetspeak_password)
+    # Generate and analyze an improved password
+    improved_password = improve_password_score(password)
+    improved_analysis = analyze_password_logic(improved_password)
     
     # Return all information
     return {
         "original_analysis": original_analysis,
         "suggestions": suggestions,
-        "leetspeak_password": leetspeak_analysis
+        "improved_password": improved_password,
+        "improved_analysis": improved_analysis
     }
+
 
 @app.get('/')
 def read_root():
