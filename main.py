@@ -5,7 +5,6 @@ import math
 import joblib
 from collections import Counter
 from xgboost import XGBRegressor
-from transformers import pipeline
 import json
 
 app = FastAPI()
@@ -13,7 +12,6 @@ app = FastAPI()
 model = XGBRegressor()
 model.load_model('password_strength_model.json')
 
-llm_generator = pipeline("text-generation", model="distilgpt2")
 
 qwerty_adjacency = {
     '1': '2q', '2': '1qw3', '3': '2we4', '4': '3er5', '5': '4rt6',
@@ -179,30 +177,6 @@ class PasswordAnalysis(BaseModel):
     time_to_crack: dict
     features: dict
 
-def generate_improvements_with_llm(analysis: dict) -> dict:
-    prompt = (
-        "Analyze the following password analysis and suggest improvements to strengthen the password. "
-        "Also, provide a new improved password that resembles the original, but is more secure.\n\n"
-        f"Password: {analysis['password']}\n"
-        f"Score: {analysis['score']}\n"
-        f"Strength Category: {analysis['strength_category']}\n"
-        f"Time to Crack: {analysis['time_to_crack']}\n"
-        f"Features: {analysis['features']}\n\n"
-        "Provide your suggestions and new password in JSON format with keys 'suggestions' (a list of strings) "
-        "and 'improved_password' (a string)."
-    )
-
-    try:
-        response = llm_generator(prompt, max_length=250)[0]['generated_text']
-        json_start = response.find('{')
-        if json_start == -1:
-            raise ValueError("No JSON object found in the response.")
-        json_str = response[json_start:]
-        improvements = json.loads(json_str)
-        return improvements
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing LLM response: {e}")
-
 @app.post('/analyze_password/')
 def analyze_password(request: PasswordRequest):
     password = request.password
@@ -219,15 +193,6 @@ def analyze_password(request: PasswordRequest):
         'strength_category': category,
         'time_to_crack': time_estimates,
         'features': features
-    }
-
-@app.post('/improve_password/')
-def improve_password(analysis: PasswordAnalysis):
-    analysis_dict = analysis.dict()
-    llm_response = generate_improvements_with_llm(analysis_dict)
-    return {
-        "original_analysis": analysis_dict,
-        "llm_improvements": llm_response
     }
 
 @app.get('/')
